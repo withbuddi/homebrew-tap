@@ -21,7 +21,7 @@ jobs:
       FEED: https://withbuddi.com/download/mac/latest.json
       CASK: Casks/buddi.rb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Compare feed with cask
         id: feed

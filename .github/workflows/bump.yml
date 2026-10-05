@@ -75,10 +75,12 @@ jobs:
         if: steps.feed.outputs.changed == 'true'
         env:
           VERSION: ${{ steps.feed.outputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add "$CASK"
           git commit -m "buddi ${VERSION}"
-          git push origin HEAD:main
+          # setup-homebrew re-cloned the tap, so the checkout's token is gone: push with the job token.
+          git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main

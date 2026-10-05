@@ -1,0 +1,83 @@
+name: bump
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [buddi-released]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: macos-latest
+    env:
+      FEED: https://withbuddi.com/download/mac/latest.json
+      CASK: Casks/buddi.rb
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare feed with cask
+        id: feed
+        run: |
+          set -euo pipefail
+          feed="$(curl -fsSL --retry 3 "$FEED")"
+          version="$(jq -er .version <<<"$feed")"
+          sha256="$(jq -er .sha256 <<<"$feed")"
+          url="$(jq -er .url <<<"$feed")"
+          current="$(sed -nE 's/^  version "([^"]+)"$/\1/p' "$CASK")"
+          echo "feed: $version  cask: $current"
+          [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256 in feed: $sha256"; exit 1; }
+          expected="https://github.com/withbuddi/buddi/releases/download/v${version}/buddi-${version}.dmg"
+          [[ "$url" == "$expected" ]] || { echo "::error::feed url $url does not match the cask's pattern $expected"; exit 1; }
+          if [[ "$version" == "$current" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            curl -fsSIL --retry 3 -o /dev/null "$url"   # the asset exists (headers only)
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rewrite cask
+        if: steps.feed.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.feed.outputs.version }}
+          SHA256: ${{ steps.feed.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          sed -i '' -E \
+            -e "s/^  version \"[^\"]+\"$/  version \"${VERSION}\"/" \
+            -e "s/^  sha256 \"[0-9a-f]{64}\"$/  sha256 \"${SHA256}\"/" \
+            "$CASK"
+          git diff
+
+      - name: Set up Homebrew
+        if: steps.feed.outputs.changed == 'true'
+        uses: Homebrew/actions/setup-homebrew@main
+
+      - name: Style and audit
+        if: steps.feed.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          brew style --fix "$CASK"
+          # --online downloads the DMG and checks it against the feed's sha256.
+          brew audit --cask --online --strict withbuddi/tap/buddi
+
+      - name: Commit and push
+        if: steps.feed.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.feed.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$CASK"
+          git commit -m "buddi ${VERSION}"
+          git push origin HEAD:main

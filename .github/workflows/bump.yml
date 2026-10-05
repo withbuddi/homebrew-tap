@@ -2,7 +2,7 @@ name: bump
 
 on:
   schedule:
-    - cron: "23 * * * *"
+    - cron: "8,23,38,53 * * * *"
   workflow_dispatch:
   repository_dispatch:
     types: [buddi-released]
